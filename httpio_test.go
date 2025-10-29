@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pechorka/gostdlib/pkg/testing/require"
 	"github.com/pechorka/httpio"
 )
 
@@ -27,18 +26,18 @@ func TestUnmarshal(t *testing.T) {
 		r := httptest.NewRequest("GET", "/?name.first=John&name.last=Doe&age=30&banned=true&income=100000&name.middle=Middle", nil)
 
 		unmarshaler, err := httpio.NewUnmarshaler[input]()
-		require.NoError(t, err)
+		assertNoError(t, err)
 
 		var v input
 		err = unmarshaler.Unmarshal(r, &v)
-		require.NoError(t, err)
+		assertNoError(t, err)
 
-		require.Equal(t, "John", v.Name.First)
-		require.Equal(t, "Doe", v.Name.Last)
-		require.Equal(t, "Middle", *v.Name.Middle)
-		require.Equal(t, 30, v.Age)
-		require.Equal(t, true, v.Banned)
-		require.Equal(t, uint(100000), v.Income)
+		assertEqual(t, "John", v.Name.First)
+		assertEqual(t, "Doe", v.Name.Last)
+		assertEqual(t, "Middle", *v.Name.Middle)
+		assertEqual(t, 30, v.Age)
+		assertEqual(t, true, v.Banned)
+		assertEqual(t, uint(100000), v.Income)
 	})
 
 	t.Run("json and query params", func(t *testing.T) {
@@ -63,19 +62,19 @@ func TestUnmarshal(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 
 		unmarshaler, err := httpio.NewUnmarshaler[input]()
-		require.NoError(t, err)
+		assertNoError(t, err)
 
 		var v input
 		err = unmarshaler.Unmarshal(r, &v)
-		require.NoError(t, err)
+		assertNoError(t, err)
 
-		require.Equal(t, "John", v.Name.First)
-		require.Equal(t, "Doe", v.Name.Last)
-		require.Equal(t, 30, v.Age)
-		require.Equal(t, true, v.Banned)
-		require.Equal(t, uint(100000), v.Income)
-		require.Equal(t, "localhost", v.AppConfig.Host)
-		require.Equal(t, 8080, v.AppConfig.Port)
+		assertEqual(t, "John", v.Name.First)
+		assertEqual(t, "Doe", v.Name.Last)
+		assertEqual(t, 30, v.Age)
+		assertEqual(t, true, v.Banned)
+		assertEqual(t, uint(100000), v.Income)
+		assertEqual(t, "localhost", v.AppConfig.Host)
+		assertEqual(t, 8080, v.AppConfig.Port)
 	})
 
 	t.Run("path params", func(t *testing.T) {
@@ -89,14 +88,14 @@ func TestUnmarshal(t *testing.T) {
 		r.SetPathValue("org_id", "456")
 
 		unmarshaler, err := httpio.NewUnmarshaler[input]()
-		require.NoError(t, err)
+		assertNoError(t, err)
 
 		var v input
 		err = unmarshaler.Unmarshal(r, &v)
-		require.NoError(t, err)
+		assertNoError(t, err)
 
-		require.Equal(t, "123", v.UserID)
-		require.Equal(t, "456", v.OrgID)
+		assertEqual(t, "123", v.UserID)
+		assertEqual(t, "456", v.OrgID)
 	})
 
 	t.Run("header params", func(t *testing.T) {
@@ -110,14 +109,14 @@ func TestUnmarshal(t *testing.T) {
 		r.Header.Set("User-Agent", "test-client/1.0")
 
 		unmarshaler, err := httpio.NewUnmarshaler[input]()
-		require.NoError(t, err)
+		assertNoError(t, err)
 
 		var v input
 		err = unmarshaler.Unmarshal(r, &v)
-		require.NoError(t, err)
+		assertNoError(t, err)
 
-		require.Equal(t, "Bearer token123", v.Authorization)
-		require.Equal(t, "test-client/1.0", v.UserAgent)
+		assertEqual(t, "Bearer token123", v.Authorization)
+		assertEqual(t, "test-client/1.0", v.UserAgent)
 	})
 
 	t.Run("cookie params", func(t *testing.T) {
@@ -131,14 +130,14 @@ func TestUnmarshal(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "theme", Value: "dark"})
 
 		unmarshaler, err := httpio.NewUnmarshaler[input]()
-		require.NoError(t, err)
+		assertNoError(t, err)
 
 		var v input
 		err = unmarshaler.Unmarshal(r, &v)
-		require.NoError(t, err)
+		assertNoError(t, err)
 
-		require.Equal(t, "abc123", v.SessionID)
-		require.Equal(t, "dark", v.Theme)
+		assertEqual(t, "abc123", v.SessionID)
+		assertEqual(t, "dark", v.Theme)
 	})
 }
 
@@ -230,7 +229,7 @@ func BenchmarkUnmarshal(b *testing.B) {
 	r := httptest.NewRequest("GET", "/?name.first=John&name.last=Doe&age=30&banned=true&income=100000", nil)
 
 	unmarshaler, err := httpio.NewUnmarshaler[input]()
-	require.NoError(b, err)
+	assertNoError(b, err)
 
 	b.ReportAllocs()
 
@@ -240,5 +239,26 @@ func BenchmarkUnmarshal(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func assertEqual[T comparable](tb testing.TB, expected, got T) {
+	tb.Helper()
+	if expected != got {
+		tb.Fatalf("expected %v, got %v", expected, got)
+	}
+}
+
+func assertNoError(tb testing.TB, err error) {
+	tb.Helper()
+	if err != nil {
+		tb.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func assertError(tb testing.TB, err error) {
+	tb.Helper()
+	if err == nil {
+		tb.Fatalf("expected an error, got nil")
 	}
 }
