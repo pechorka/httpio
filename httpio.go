@@ -44,6 +44,15 @@ func WithDelimiter(delimiter string) UnmarshalerOption {
 	}
 }
 
+func MustNewUnmarshaler[T any](userOpts ...UnmarshalerOption) *Unmarshaler[T] {
+	u, err := NewUnmarshaler[T](userOpts...)
+	if err != nil {
+		panic(err)
+	}
+
+	return u
+}
+
 func NewUnmarshaler[T any](userOpts ...UnmarshalerOption) (*Unmarshaler[T], error) {
 	opts := &UnmarshalerOptions{
 		PathLookuper: defaultPathLookuper,
@@ -54,7 +63,8 @@ func NewUnmarshaler[T any](userOpts ...UnmarshalerOption) (*Unmarshaler[T], erro
 	}
 	compiledType, err := compileType[T](opts.Delimiter)
 	if err != nil {
-		return nil, fmt.Errorf("failed to compile type: %w", err)
+		var zero T
+		return nil, fmt.Errorf("failed to compile type %T: %w", zero, err)
 	}
 	return &Unmarshaler[T]{
 		c:            compiledType,
