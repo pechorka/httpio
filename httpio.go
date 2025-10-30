@@ -75,6 +75,7 @@ const (
 	tagTypePath
 	tagTypeHeader
 	tagTypeCookie
+	tagTypeForm
 )
 
 type valueSetterFunc func(v reflect.Value, vals []string) error
@@ -88,6 +89,7 @@ type compiledField struct {
 
 type compiledType struct {
 	queryFields  map[string]compiledField
+	formFields   map[string]compiledField
 	pathFields   map[string]compiledField
 	headerFields map[string]compiledField
 	cookieFields map[string]compiledField
@@ -108,9 +110,10 @@ func compileType[T any](delimiter string) (*compiledType, error) {
 
 	c := &compiledType{
 		queryFields:  map[string]compiledField{},
+		formFields:   map[string]compiledField{},
 		pathFields:   map[string]compiledField{},
 		headerFields: map[string]compiledField{},
-		cookieFields: map[string]compiledField{},	
+		cookieFields: map[string]compiledField{},
 	}
 	walkType(t, nil, nil, delimiter, c)
 
@@ -142,7 +145,7 @@ func walkType(
 		idx := append(slices.Clone(idxPrefix), sf.Index...)
 
 		under := sf.Type
-		isPtr := under.Kind() == reflect.Ptr
+		isPtr := under.Kind() == reflect.Pointer
 		if isPtr {
 			under = under.Elem()
 		}
@@ -163,6 +166,8 @@ func walkType(
 		switch src {
 		case tagTypeQuery:
 			out.queryFields[fullName] = cf
+		case tagTypeForm:
+			out.formFields[fullName] = cf
 		case tagTypePath:
 			out.pathFields[fullName] = cf
 		case tagTypeHeader:
@@ -178,6 +183,9 @@ func findTag(t reflect.StructField) (string, tagType, bool) {
 	// Check for direct tag names: query, path, header, cookie
 	if tag, ok := t.Tag.Lookup("query"); ok && tag != "" {
 		return tag, tagTypeQuery, true
+	}
+	if tag, ok := t.Tag.Lookup("form"); ok && tag != "" {
+		return tag, tagTypeForm, true
 	}
 	if tag, ok := t.Tag.Lookup("path"); ok && tag != "" {
 		return tag, tagTypePath, true
@@ -345,9 +353,13 @@ func (u *Unmarshaler[T]) Unmarshal(r *http.Request, dst *T) error {
 		}
 	}
 
+	// TODO: handle possible intermidiate nulls
+	// For example, target field is Struct1.Struct2.Struct3.Field
+	// and Struct2 might be null
 	root := reflect.ValueOf(dst).Elem()
 	err := firstError(
 		unmarshalQuery(r, u.c.queryFields, root),
+		unmarshalForm(r, u.c.formFields, root),
 		unmarshalPath(r, u.c.pathFields, root, u.pathLookuper),
 		unmarshalHeader(r, u.c.headerFields, root),
 		unmarshalCookie(r, u.c.cookieFields, root),
@@ -362,13 +374,53 @@ func (u *Unmarshaler[T]) Unmarshal(r *http.Request, dst *T) error {
 func unmarshalQuery(r *http.Request, fields map[string]compiledField, dstStruct reflect.Value) error {
 	if len(fields) == 0 {
 		return nil
-	}	
+	}
 
 	parsedQuery := r.URL.Query()
 
 	for key, vals := range parsedQuery {
 		cf, ok := fields[key]
 		if !ok {
+			continue
+		}
+
+		fieldV := dstStruct.FieldByIndex(cf.idx)
+		if err := cf.set(fieldV, vals); err != nil {
+			return fmt.Errorf("field %s: %w", cf.structField, err)
+		}
+	}
+
+	return nil
+}
+
+func unmarshalForm(r *http.Request, fields map[string]compiledField, dstStruct reflect.Value) error {
+	if len(fields) == 0 {
+		return nil
+	}
+
+	var parseErr error
+	if ct := r.Header.Get("Content-Type"); ct != "" {
+		if mt, _, err := mime.ParseMediaType(ct); err == nil && mt == "multipart/form-data" {
+			parseErr = r.ParseMultipartForm(int64(32 << 20))
+		} else {
+			parseErr = r.ParseForm()
+		}
+	} else {
+		parseErr = r.ParseForm()
+	}
+	if parseErr != nil {
+		return fmt.Errorf("parse form: %w", parseErr)
+	}
+
+	for key, cf := range fields {
+		var vals []string
+		if r.MultipartForm != nil {
+			vals = r.MultipartForm.Value[key]
+		}
+		if len(vals) == 0 && len(r.PostForm) > 0 {
+			vals = r.PostForm[key]
+		}
+		if len(vals) == 0 {
 			continue
 		}
 
@@ -389,7 +441,7 @@ func unmarshalPath(
 ) error {
 	if len(fields) == 0 {
 		return nil
-	}	
+	}
 
 	for key, cf := range fields {
 		v, okPath := pathLookuper(r, key)
@@ -412,7 +464,7 @@ func unmarshalHeader(
 ) error {
 	if len(fields) == 0 {
 		return nil
-	}	
+	}
 
 	for key, vals := range r.Header {
 		cf, ok := fields[key]

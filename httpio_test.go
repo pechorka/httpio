@@ -1,8 +1,11 @@
 package httpio_test
 
 import (
+	"bytes"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -138,6 +141,77 @@ func TestUnmarshal(t *testing.T) {
 
 		assertEqual(t, "abc123", v.SessionID)
 		assertEqual(t, "dark", v.Theme)
+	})
+
+	t.Run("form params", func(t *testing.T) {
+		type fullName struct {
+			First string `form:"first"`
+			Last  string `form:"last"`
+		}
+		type input struct {
+			Name   fullName `form:"name"`
+			Age    int      `form:"age"`
+			Roles  []string `form:"roles"`
+			Active bool     `form:"active"`
+		}
+
+		form := url.Values{}
+		form.Set("name.first", "Jane")
+		form.Set("name.last", "Doe")
+		form.Set("age", "25")
+		form.Add("roles", "admin")
+		form.Add("roles", "editor")
+		form.Set("active", "true")
+
+		r := httptest.NewRequest("POST", "/", strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+		unmarshaler, err := httpio.NewUnmarshaler[input]()
+		assertNoError(t, err)
+
+		var v input
+		err = unmarshaler.Unmarshal(r, &v)
+		assertNoError(t, err)
+
+		assertEqual(t, "Jane", v.Name.First)
+		assertEqual(t, "Doe", v.Name.Last)
+		assertEqual(t, 25, v.Age)
+		assertEqual(t, true, v.Active)
+		assertEqual(t, 2, len(v.Roles))
+		assertEqual(t, "admin", v.Roles[0])
+		assertEqual(t, "editor", v.Roles[1])
+	})
+
+	t.Run("multipart form params", func(t *testing.T) {
+		type input struct {
+			Title   string   `form:"title"`
+			Tags    []string `form:"tags"`
+			Publish bool     `form:"publish"`
+		}
+
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		assertNoError(t, writer.WriteField("title", "Multipart Title"))
+		assertNoError(t, writer.WriteField("tags", "go"))
+		assertNoError(t, writer.WriteField("tags", "http"))
+		assertNoError(t, writer.WriteField("publish", "true"))
+		assertNoError(t, writer.Close())
+
+		r := httptest.NewRequest("POST", "/", &body)
+		r.Header.Set("Content-Type", writer.FormDataContentType())
+
+		unmarshaler, err := httpio.NewUnmarshaler[input]()
+		assertNoError(t, err)
+
+		var v input
+		err = unmarshaler.Unmarshal(r, &v)
+		assertNoError(t, err)
+
+		assertEqual(t, "Multipart Title", v.Title)
+		assertEqual(t, 2, len(v.Tags))
+		assertEqual(t, "go", v.Tags[0])
+		assertEqual(t, "http", v.Tags[1])
+		assertEqual(t, true, v.Publish)
 	})
 }
 
